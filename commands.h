@@ -49,13 +49,17 @@
 #define	STEPPER_MOVE_MIXED   "XM"
 
 void generateCommand(char* command, char* prefix, char* parameters){
-	memset(command, '\0', 10000);
-	memcpy(command, prefix,  strlen(prefix)); 
-	command[strlen(command)] = ',';
-	memcpy(&command[strlen(command)], parameters, strlen(parameters));
-	command[strlen(command)] = '\n';
-	command[strlen(command)] = '\0';
-	printf("%s", command);
+	int last = 0;
+	memset(command, '\0', sizeof(command));
+	memcpy(command, prefix,  strlen(prefix));
+	last+= strlen(prefix); 
+	if(parameters != ""){
+		command[strlen(command)] = ',';
+		memcpy(&command[strlen(command)], parameters, strlen(parameters));
+		last+= strlen(parameters)+1; 
+	}
+	command[last] = '\n';
+	command[last+1] = '\0';
 }
 
 
