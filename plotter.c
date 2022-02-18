@@ -4,6 +4,15 @@
 
 int serial_port;
 struct termios tty;
+int motor_status = 0;
+
+void *readThread(void * buffer){
+	while(1){
+        	sleep(0.25);
+        	serialRead(buffer);
+        	printf("buffer: %s", buffer);
+    	}
+}
 
 /*
  * Function findPlotter
@@ -66,7 +75,10 @@ char * findPlotter(){
 
 int init(){
 	char* path = findPlotter();  
-      	serial_port = open(path, O_RDWR);
+    serial_port = open(path, O_RDWR);
+	char* buffer = malloc(50*sizeof(char));
+    pthread_t thread_id;
+    pthread_create(&thread_id,NULL,readThread,buffer);
 	sleep(3);
 	if(serial_port < 0){
 		printf("ERROR %i from open: %s\n", errno, strerror(errno));
@@ -111,6 +123,67 @@ int init(){
 }
 
 
+int importContours(ContourNode* contour){
+    FILE *FP;
+    char buffer[255];
+    int * xpos = calloc(5000,sizeof(int));
+    int * ypos = calloc(5000,sizeof(int));
+    FP = fopen("./contours.txt","r");
+    int points = 0;
+    int contour_count = 0;
+    int width = strtol(fgets(buffer,sizeof(buffer), FP),(char**)NULL,10);
+    int height = strtol(fgets(buffer,sizeof(buffer), FP),(char**)NULL,10);
+    while(fgets(buffer, sizeof(buffer), FP)){
+        if(strstr(buffer, "---")){
+            contour->height = height;
+            contour->width = width;
+            contour->x_positions = xpos; 
+            contour->y_positions = ypos;
+            contour->size = points;
+            contour->next = (ContourNode *) malloc(sizeof(ContourNode));
+            contour->end = 0;
+            contour = (ContourNode *) contour->next;
+            points = 0;
+            contour->end = 1;
+            xpos = calloc(5000,sizeof(int));
+            ypos = calloc(5000,sizeof(int));
+            printf("%d\n", contour_count++);
+            continue;
+        }
+        char *token = strtok(buffer, " ");
+        int count = 0;
+        while(token != NULL){
+            if (count == 0){
+                ypos[points] = strtol(token, (char **)NULL, 10);
+            }
+            if (count == 1){
+                xpos[points] = strtol(token, (char **)NULL, 10);
+            }
+            count++;
+            token = strtok(NULL," ");
+        }
+        points++;
+    }
+}
+
+int printList(ContourNode * HEAD){
+    ContourNode * temp = HEAD;
+    int count = 0;
+    do{
+        printf("%d\n", count++);
+        printf("-------\n");
+        int i = 0;
+        for(i = 0; i < temp->size; i++){
+            printf("x[1]: %d, ", temp->x_positions[i]);
+            printf("y[1]: %d\n", temp->y_positions[i]);
+        }
+        printf("Points: %d\n", temp->size);
+        printf("Points: %d\n", temp->end);
+        printf("-------\n\n");
+        temp = (ContourNode *)temp->next;
+    }while(!temp->end);
+}
+
 /*
  * Function lowerPen
  * --------------------------------------------------------
@@ -121,21 +194,31 @@ int init(){
 int lowerPen(){
 	char* message = malloc(50*sizeof(char));
 	generateCommand(message,SET_PEN,"0");
-	printf("%s\n",message);
 	serialWrite(message);
 	sleep(0.1);
 }
 
-int pixelToStep(int width, int height, int* x, int* y){
-    double ratioX = (double) MAX_X/height;
-    double ratioY = (double) MAX_Y/width;
-    *x = *x*ratioX;
-    *y = *y*ratioY;
+int pixelToStep(int height, int width, int* x, int* y){
+    int ratioX = (int) MAX_X/height;
+    int ratioY = (int) MAX_Y/width;
+    *x = *x * ratioX;
+    *y = *y * ratioY;
     return 0;
 }
 
-int drawImage(){
-    
+int drawImage(ContourNode* HEAD){
+    ContourNode * temp = HEAD;
+    int count = 0;
+    do{
+        printf("Points: %d\n", temp->size);
+        int i = 0; 
+       for(i = 0; i < temp->size;i++){
+            pixelToStep(360,360,&temp->x_positions[i],&temp->y_positions[i]);
+        }
+        drawContour(temp->x_positions,temp->y_positions,temp->size);
+        temp = temp->next;
+    }while(!temp->end);
+    movePen(0,0,0);
     return 0;
 }
 
@@ -148,7 +231,6 @@ int drawImage(){
 
 int raisePen(){
 	char* message = malloc(50*sizeof(char));
-	printf("%s\n",message);
 	generateCommand(message,SET_PEN,"1");
 	serialWrite(message);
 	sleep(0.1);
@@ -175,7 +257,7 @@ int drawContour(int* x, int* y, int points){
 	sleep(1.5);
 	int i;
 	printf("points: %d\n",points);
-	for(i = 1; i < points; i++){
+	for(i = 0; i < points; i++){
 		movePen(x[i], y[i], 0);	
 	}
 	sleep(1.5);
@@ -187,7 +269,7 @@ int drawContour(int* x, int* y, int points){
 /*
  * Function movePen
  * --------------------------------------------------------
- * brief: Moves writing head to specified position.
+ * brief: Moves writing head /o specified position.
  *
  * x: X position in steps to be moved to.
  *
@@ -201,14 +283,12 @@ int drawContour(int* x, int* y, int points){
 
 int movePen(int x, int y, int strictMode){
 	char* move_message = malloc(50*sizeof(char));
-	char* buffer = malloc(50*sizeof(char));
 	int motorStatus = 0;
 	if(x < 0 || y < 0){
 		printf("%s", BoundsError);
 		printf("Desired X: %d, Desired Y: %d\n", x, y);
 		printf("Min X: %d, Min Y: %d\n", 0, 0);
 		free(move_message);
-		free(buffer);
 		return 1;
 	}
 	if(x > MAX_X || y > MAX_Y){
@@ -216,42 +296,27 @@ int movePen(int x, int y, int strictMode){
 		printf("Desired X: %d, Desired Y: %d\n", x, y);
 		printf("Max X: %d, Max Y: %d\n", MAX_X, MAX_Y);
 		free(move_message);
-		free(buffer);
 		return 1;
 	}
 
-	if (strictMode)
-		 motorStatus = getMotorStatus();
-	if(motorStatus){
-		printf("Error Motors Currently Operating");
-		free(move_message);
-		free(buffer);
-		return 1;
-	}
+	if (strictMode){
+        int ms;
+	    while(ms = getMotorStatus())  sleep(0.25);
+    }   
 	int xSteps = x-plotterXPos;
 	int ySteps = y-plotterYPos;
-	int moveTime = sqrt(xSteps*xSteps + ySteps*ySteps)*0.15;
-	char *params;
+	int moveTime = sqrt(xSteps*xSteps + ySteps*ySteps)*0.55;
+    char *params;
 	size_t sz;
 	sz = snprintf(NULL, 0, "%d,%d,%d", moveTime, xSteps,ySteps);
 	params = (char *) malloc(sz+1);
 	sz = snprintf(params, sz+1, "%d,%d,%d", moveTime, xSteps,ySteps);
 	generateCommand(move_message,STEPPER_MOVE_MIXED,params);
+    printf("command: %s", move_message);
 	serialWrite(move_message);
-	if(strictMode){
-		while(getMotorStatus()){
-			sleep(0.1);
-		}
-		serialRead(buffer);
-		if(!strstr(buffer,"OK")){
-			printf("ERROR In Motion\n");
-			free(move_message);
-			free(buffer);
-			return 1;	
-		}
-	}
-	plotterXPos = x;
+    plotterXPos = x;
 	plotterYPos = y;
+    sleep((double)moveTime/1000.0);
 }
 
 
@@ -270,12 +335,14 @@ int getMotorStatus(){
 	char* message = malloc(50*sizeof(char));
 	int status = 0;
 	generateCommand(message,QUERY_MOTORS,"");
-	serialWrite(message);
-	sleep(1);
-	serialRead(motor_buffer);
+    int count = 0;
+    do{
+	    serialWrite(message);
+	    sleep(0.5);
+	    count = serialRead(motor_buffer);
+    }while(count < 11);
 	const char delim[2] = ",";
 	char *substring;
-	printf("%s\n",motor_buffer);
 	substring = strtok(motor_buffer, delim);
 	if(!strstr(substring, "0") && !strstr(substring, "Q"))
 		status = 1;
@@ -319,37 +386,16 @@ int serialWrite(char * msg){
 
 int serialRead(char* buffer){
 	memset(buffer, '\0', sizeof(buffer));
-	char temp[1];
+	char temp;
 	int n = 0;
-	while(temp[0] != '\n'){
-		 n += read(serial_port, temp, 1);
-		 buffer[n-1] = temp[0]; 
+    long timeout = (long)time(NULL)+3;
+	while(temp != '\n' && (long)time(NULL) < timeout){
+        sleep(0.05); 
+        int size_read = 0;
+		 n += read(serial_port, &temp, 1);
+         if (n > 0) {
+		 buffer[n-1] = temp;
+         }
 	}
 	return n;
-}
-
-
-int main(){
-	char* message = malloc(50*sizeof(char));
-	printf("%s", Welcome);
-	init();
-	int* test_x = malloc(200*sizeof(int));
-	int* test_y = malloc(200*sizeof(int));
-	int count = 0;
-	int i = 0;
-    int x = 500;
-    int y = 500;
-    pixelToStep(850,1100, &x,&y);
-    printf("%d\n", x);
-    printf("%d\n", y);
-	for(i = 0; i < 10000;i+=100){
-		printf("%d", i);
-		test_x[count] = i;
-		test_y[count] = (int)1000*sin(0.005*i)+2000;
-		printf("X: %d Y: %d\n",test_x[count],test_y[count]);
-		count++;
-	}
-	drawContour(test_x,test_y,count);
-	generateCommand(message,HOME,"3000");
-	serialWrite(message);
 }
