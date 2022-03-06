@@ -11,8 +11,8 @@ int importContours(ContourNode* contour){
     FP = fopen("./contours.txt","r");
     int points = 0;
     int contour_count = 0;
-    int width = strol(fgets(buffer, sizeof(buffer), FP), (char **)NULL, 10);   
-    int height = strol(fgets(buffer, sizeof(buffer), FP), (char **)NULL, 10);   
+    int width = strtol(fgets(buffer, sizeof(buffer), FP), (char **)NULL, 10);   
+    int height = strtol(fgets(buffer, sizeof(buffer), FP), (char **)NULL, 10);   
     while(fgets(buffer, sizeof(buffer), FP)){
         if(strstr(buffer, "---")){
             contour->width = width;

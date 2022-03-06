@@ -30,7 +30,7 @@ int serialWrite();
 int serialRead();
 
 
-typedef struct ContorNode{
+typedef struct ContourNode{
     int* x_positions;
     int* y_positions;
     int size;

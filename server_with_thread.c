@@ -32,8 +32,9 @@ short SocketCreate(void){
  */
 
 void *sampleFunction(void *vargp) {
-    ContourNode* linked_list = malloc(sizeof(ContourNode)*5);
+    ContourNode* linked_list = malloc(sizeof(ContourNode)*100);
     importContours(linked_list);
+    printList(linked_list);
     drawImage(linked_list);
 	return NULL;
 }
@@ -104,7 +105,7 @@ int main(){
     	send(new_socket,server_message,sizeof(server_message),0);
     	printf("Connection accepted\n");
 	    status = read(new_socket, data_buffer, sizeof(int)*100000);
-	    receive_file(data_buffer, status);
+	    //receive_file(data_buffer, status);
         pthread_t thread_id;    //Creates variable to hold thread_id
 	    pthread_create(&thread_id,NULL,sampleFunction,NULL);    //Connects thread_id to sampleFunction
 	    char confirm_message[256] = "Message Received!";
