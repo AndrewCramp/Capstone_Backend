@@ -25,23 +25,31 @@ short SocketCreate(void){
 
 
 /*
- * Function sampleFunction
+ * Function CheckBuffer
  *---------------------------------------------------------
  * brief: Thread to execute code on plotter
  * 
  */
 
-void *sampleFunction(void *vargp) {
-    ContourNode* linked_list = malloc(sizeof(ContourNode)*100);
-    importContours(linked_list);
-    printList(linked_list);
-    drawImage(linked_list);
-	return NULL;
+void * checkBuffer(void *vargp) {
+    int count = 0;
+    while(1){
+        if(count < numberOfFiles){
+            char * filename = malloc(20*sizeof(char));
+            snprintf(filename, 20, "./contours%d.txt", count);
+            ContourNode* linked_list = malloc(sizeof(ContourNode));
+            importContours(linked_list, filename);
+            printList(linked_list);
+            drawImage(linked_list);
+            count++;
+            free(filename);
+        }
+    }
 }
 
-void receive_file(char * buffer, int size) {
+int receive_file(char * buffer, int size, char * name_buffer) {
     FILE *fp;
-    fp = fopen("./contours.txt", "w");
+    fp = fopen(name_buffer, "w");
     if (fp == NULL){
         printf("Error");
         exit(1);
@@ -68,14 +76,18 @@ void receive_file(char * buffer, int size) {
  */
 
 int main(){
-	char server_message[256] = "server says f is for friends";
+//	char server_message[256] = "server says f is for friends";
 	short socket_desc, new_socket;
 	int c, status;
 	struct sockaddr_in server, client;
 	char ip_address[] = "192.168.0.123";
     char * data_buffer = malloc(sizeof(char)*100000);
 	unsigned int port = 13000;
+    char * filename = malloc(20*sizeof(char));
+    numberOfFiles = 0;
     init();
+    pthread_t thread_id;    //Creates variable to hold thread_id
+	pthread_create(&thread_id,NULL,checkBuffer,NULL);    //Connects thread_id to sampleFunction
 	socket_desc = SocketCreate();   // Create Host Socket
 	if(socket_desc < 0){
 		printf("Failed to create socket. Error: %s\n", strerror(errno));
@@ -97,20 +109,28 @@ int main(){
     c = sizeof(struct sockaddr_in);
     //Accept Client Connection
 	while(1){
+        realloc(filename, 20*sizeof(char));
+        int *status = realloc(data_buffer, sizeof(char)*100000);
     	new_socket = accept(socket_desc, (struct sockaddr *)&client, (socklen_t *)&c);
     	if(new_socket == -1){
             sleep(0.5);
     	    continue;
         }
-    	send(new_socket,server_message,sizeof(server_message),0);
+   // 	send(new_socket,server_message,sizeof(server_message),0);
     	printf("Connection accepted\n");
-	    status = read(new_socket, data_buffer, sizeof(int)*100000);
-	    //receive_file(data_buffer, status);
-        pthread_t thread_id;    //Creates variable to hold thread_id
-	    pthread_create(&thread_id,NULL,sampleFunction,NULL);    //Connects thread_id to sampleFunction
-	    char confirm_message[256] = "Message Received!";
-	    status = write(new_socket, confirm_message, sizeof(confirm_message));
+        
+        int bytes_read = 0;
+        while(bytes_read < 5){
+	        bytes_read += read(new_socket, data_buffer+bytes_read, sizeof(int)*100000);
+        }
+        snprintf(filename, 20, "./contours%d.txt", numberOfFiles);
+        printf("%s\n", filename);
+	    receive_file(data_buffer, bytes_read, filename);
+        numberOfFiles++;
+	//    char confirm_message[256] = "Message Received!";
+	//    status = write(new_socket, confirm_message, sizeof(confirm_message));
     }
+    free(filename);
 	close(socket_desc);	
     return 0;
 }

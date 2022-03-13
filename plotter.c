@@ -5,9 +5,10 @@
 int serial_port;
 struct termios tty;
 int motor_status = 0;
-void *readThread(void * buffer){
+void *readThread(){
+    char* buffer = malloc(50*sizeof(char));
     while(1){
-        sleep(1);
+        sleep(0.75);
         serialRead(buffer);
         printf("%s", buffer);
     }
@@ -75,9 +76,8 @@ char * findPlotter(){
 
 int init(){
 	char* path = findPlotter();  
-	char* buffer = malloc(50*sizeof(char));
     pthread_t thread_id_read;
-    pthread_create(&thread_id_read,NULL,readThread,buffer);
+    pthread_create(&thread_id_read,NULL,readThread, NULL);
       	serial_port = open(path, O_RDWR);
 	sleep(3);
 	if(serial_port < 0){
@@ -109,7 +109,7 @@ int init(){
 	tty.c_oflag &= ~ONLCR;
 
 	tty.c_cc[VTIME] = 0;
-	tty.c_cc[VMIN] = 13;
+	tty.c_cc[VMIN] = 0;
 
 	cfsetispeed(&tty, B115200);
 	cfsetospeed(&tty, B115200);
@@ -119,8 +119,6 @@ int init(){
 		return 1;
 	}
 	tcflush(serial_port, TCIFLUSH);
-    plotterXPos = 0;
-    plotterYPos = 0;
 	return 0;
 }
 
@@ -138,6 +136,7 @@ int lowerPen(){
 	printf("%s\n",message);
 	serialWrite(message);
 	sleep(0.1);
+    free(message);
 }
 
 int pixelToStep(int height, int width, int* x, int* y){
@@ -156,6 +155,8 @@ int plotterHome(){
 }
 
 int drawImage(ContourNode* HEAD){
+    plotterXPos = 0;
+    plotterYPos = 0;
     ContourNode * temp = HEAD;
     int count = 0;
     do{
@@ -165,19 +166,26 @@ int drawImage(ContourNode* HEAD){
             pixelToStep(temp->height,temp->width,&temp->x_positions[i],&temp->y_positions[i]);
         }
         drawContour(temp->x_positions,temp->y_positions,temp->size);
+        ContourNode * to_free = temp;
         temp = temp->next;
+        free(to_free->x_positions);
+        free(to_free->y_positions);
+        free(to_free);
         count++;
     }while(!temp->end);
+    if(temp->next){
+        free(temp->next);
+    }
     plotterHome();
     return 0;
 }
 
-int importContours(ContourNode* contour){
+int importContours(ContourNode* contour, char* filename){
     FILE *FP;
     char buffer[255];
     int * xpos = calloc(5000,sizeof(int));
     int * ypos = calloc(5000,sizeof(int));
-    FP = fopen("./contours.txt","r");
+    FP = fopen(filename,"r");
     int points = 0;
     int contour_count = 0;
     int width = strtol(fgets(buffer,sizeof(buffer), FP),(char**)NULL,10);
@@ -244,6 +252,7 @@ int raisePen(){
 	generateCommand(message,SET_PEN,"1");
 	serialWrite(message);
 	sleep(0.1);
+    free(message);
 }
 
 /*
@@ -270,6 +279,7 @@ int drawContour(int* x, int* y, int points){
         printf("point: %d\n",i);
 		movePen(x[i], y[i], 0);	
 	}
+    movePen(x[0], y[0]);
 	raisePen();
 	sleep(1);
 	return 0;
@@ -319,8 +329,8 @@ int movePen(int x, int y, int strictMode){
 	int s1 = abs(xSteps + ySteps);
 	int s2 = abs(xSteps - ySteps);
     int max_distance = (s1 >s2) ? s1 : s2;
-	int moveTime = max_distance*0.12;
-    if (moveTime < 10) moveTime = 10;
+	int moveTime = max_distance*0.15;
+    if (moveTime < 1) moveTime = 1;
     char *params;
 	size_t sz;
 	sz = snprintf(NULL, 0, "%d,%d,%d", moveTime, xSteps,ySteps);
@@ -328,18 +338,11 @@ int movePen(int x, int y, int strictMode){
 	params = (char *) malloc(sz+1);
 	sz = snprintf(params, sz+1, "%d,%d,%d", moveTime, xSteps,ySteps);
 	generateCommand(move_message,STEPPER_MOVE_MIXED,params);
-	if(moveTime == 0){
-        printf("sleepy time: %f", (float)(moveTime)*1000.0);
-        printf("asdfasdf"); 
-        free(move_message);
-        return 1;
-    }
     serialWrite(move_message);
     plotterXPos = x;
 	plotterYPos = y;
     free(move_message);
-    printf("sleepy time: %f", (float)(moveTime)*1000.0);
-    usleep((useconds_t ) (moveTime+50)*1000);
+    usleep((useconds_t ) (moveTime)*1000);
 }
 
 
@@ -392,8 +395,12 @@ int getMotorStatus(){
 */
 
 int serialWrite(char * msg){
-	write(serial_port, msg, strlen(msg));
-	return 0;
+	int n = write(serial_port, msg, strlen(msg));
+	printf("bytes sent:%d\n", n); 
+    if(n == -1){
+        init();
+    }
+    return 0;
 }
 
 /*
